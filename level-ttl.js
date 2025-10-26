@@ -1,16 +1,15 @@
 'use strict'
 
-const after = require('after')
-const xtend = require('xtend')
 const encoding = require('./encoding')
-const Lock = require('lock').Lock
+const AsyncLock = require('async-lock')
+const { EntryStream } = require('level-read-stream')
 
 function prefixKey (db, key) {
   return db._ttl.encoding.encode(db._ttl._prefixNs.concat(key))
 }
 
-function expiryKey (db, exp, key) {
-  return db._ttl.encoding.encode(db._ttl._expiryNs.concat(exp, key))
+function expiryKey (db, expiryDate, key) {
+  return db._ttl.encoding.encode(db._ttl._expiryNs.concat(expiryDate, key))
 }
 
 function buildQuery (db) {
@@ -31,17 +30,11 @@ function startTtl (db, checkFrequency) {
     const sub = db._ttl.sub
     const query = buildQuery(db)
     const decode = db._ttl.encoding.decode
-    var createReadStream
 
     db._ttl._checkInProgress = true
+    const emitError = db.emit.bind(db, 'error')
 
-    if (sub) {
-      createReadStream = sub.createReadStream.bind(sub)
-    } else {
-      createReadStream = db.createReadStream.bind(db)
-    }
-
-    createReadStream(query)
+    new EntryStream(sub || db, query)
       .on('data', function (data) {
         // the value is the key!
         const key = decode(data.value)
@@ -51,29 +44,22 @@ function startTtl (db, checkFrequency) {
         // the actual data that should expire now!
         batch.push({ type: 'del', key: key })
       })
-      .on('error', db.emit.bind(db, 'error'))
+      .on('error', emitError)
       .on('end', function () {
         if (!batch.length) return
 
         if (sub) {
-          sub.batch(subBatch, { keyEncoding: 'binary' }, function (err) {
-            if (err) db.emit('error', err)
-          })
-
-          db._ttl.batch(batch, { keyEncoding: 'binary' }, function (err) {
-            if (err) db.emit('error', err)
-          })
+          sub.batch(subBatch, { keyEncoding: 'binary' }).catch(emitError)
+          db._ttl.batch(batch, { keyEncoding: 'binary' }).catch(emitError)
         } else {
-          db._ttl.batch(subBatch.concat(batch), { keyEncoding: 'binary' }, function (err) {
-            if (err) db.emit('error', err)
-          })
+          db._ttl.batch(subBatch.concat(batch), { keyEncoding: 'binary' }).catch(emitError)
         }
       })
       .on('close', function () {
         db._ttl._checkInProgress = false
         if (db._ttl._stopAfterCheck) {
-          stopTtl(db, db._ttl._stopAfterCheck)
-          db._ttl._stopAfterCheck = null
+          stopTtl(db)
+          db._ttl._stopAfterCheck = false
         }
       })
   }, checkFrequency)
@@ -83,176 +69,128 @@ function startTtl (db, checkFrequency) {
   }
 }
 
-function stopTtl (db, callback) {
+function stopTtl (db) {
   // can't close a db while an interator is in progress
   // so if one is, defer
   if (db._ttl._checkInProgress) {
-    db._ttl._stopAfterCheck = callback
-    // TODO do we really need to return the callback here?
-    return db._ttl._stopAfterCheck
+    db._ttl._stopAfterCheck = true
+  } else {
+    clearInterval(db._ttl.intervalId)
   }
-  clearInterval(db._ttl.intervalId)
-  callback && callback()
 }
 
-function ttlon (db, keys, ttl, callback) {
-  const exp = new Date(Date.now() + ttl)
+async function ttlon (db, keys, ttl) {
+  const expiryTime = new Date(Date.now() + ttl)
   const batch = []
   const sub = db._ttl.sub
   const batchFn = (sub ? sub.batch.bind(sub) : db._ttl.batch)
   const encode = db._ttl.encoding.encode
 
-  db._ttl._lock(keys, function (release) {
-    callback = release(callback || function () {})
-    ttloff(db, keys, function () {
+  await db._ttl._lock.acquire(keys, async function (release) {
+    try {
+      await ttloff(db, keys)
       keys.forEach(function (key) {
-        batch.push({ type: 'put', key: expiryKey(db, exp, key), value: encode(key) })
-        batch.push({ type: 'put', key: prefixKey(db, key), value: encode(exp) })
+        batch.push({ type: 'put', key: expiryKey(db, expiryTime, key), value: encode(key) })
+        batch.push({ type: 'put', key: prefixKey(db, key), value: encode(expiryTime) })
       })
+      if (!batch.length) return release()
 
-      if (!batch.length) return callback()
-
-      batchFn(batch, { keyEncoding: 'binary', valueEncoding: 'binary' }, function (err) {
-        if (err) { db.emit('error', err) }
-        callback()
-      })
-    })
+      await batchFn(batch, { keyEncoding: 'binary', valueEncoding: 'binary' })
+    } catch (err) {
+      db.emit('error', err)
+    }
+    release()
   })
 }
 
-function ttloff (db, keys, callback) {
+async function ttloff (db, keys) {
   const batch = []
   const sub = db._ttl.sub
   const getFn = (sub ? sub.get.bind(sub) : db.get.bind(db))
   const batchFn = (sub ? sub.batch.bind(sub) : db._ttl.batch)
   const decode = db._ttl.encoding.decode
-  const done = after(keys.length, function (err) {
-    if (err) db.emit('error', err)
-
-    if (!batch.length) return callback && callback()
-
-    batchFn(batch, { keyEncoding: 'binary', valueEncoding: 'binary' }, function (err) {
-      if (err) { db.emit('error', err) }
-      callback && callback()
-    })
-  })
-
-  keys.forEach(function (key) {
-    const prefixedKey = prefixKey(db, key)
-    getFn(prefixedKey, { keyEncoding: 'binary', valueEncoding: 'binary' }, function (err, exp) {
-      if (!err && exp) {
-        batch.push({ type: 'del', key: expiryKey(db, decode(exp), key) })
-        batch.push({ type: 'del', key: prefixedKey })
+  try {
+    await Promise.all(keys.map(async key => {
+      const prefixedKey = prefixKey(db, key)
+      try {
+        // TODO: refactor with getMany
+        const exp = await getFn(prefixedKey, { keyEncoding: 'binary', valueEncoding: 'binary' })
+        if (exp) {
+          batch.push({ type: 'del', key: expiryKey(db, decode(exp), key) })
+          batch.push({ type: 'del', key: prefixedKey })
+        }
+      } catch (err) {
+        if (err.name !== 'NotFoundError') throw err
       }
-      done(err && err.name !== 'NotFoundError' && err)
-    })
-  })
+    }))
+    if (!batch.length) return
+    await batchFn(batch, { keyEncoding: 'binary', valueEncoding: 'binary' })
+  } catch (err) {
+    db.emit('error', err)
+  }
 }
 
-function put (db, key, value, options, callback) {
-  if (typeof options === 'function') {
-    callback = options
-    options = {}
-  }
-
-  options || (options = {})
-
+function put (db, key, value, options = {}) {
   if (db._ttl.options.defaultTTL > 0 && !options.ttl && options.ttl !== 0) {
     options.ttl = db._ttl.options.defaultTTL
   }
-
-  var done
-  var _callback = callback
 
   if (options.ttl > 0 && key != null && value != null) {
-    done = after(2, _callback || function () {})
-    callback = done
-    ttlon(db, [key], options.ttl, done)
+    return Promise.all([
+      db._ttl.put.call(db, key, value, options),
+      ttlon(db, [key], options.ttl)
+    ])
+  } else {
+    return db._ttl.put.call(db, key, value, options)
   }
-
-  db._ttl.put.call(db, key, value, options, callback)
 }
 
-function setTtl (db, key, ttl, callback) {
+function setTtl (db, key, ttl) {
   if (ttl > 0 && key != null) {
-    ttlon(db, [key], ttl, callback)
+    ttlon(db, [key], ttl)
   }
 }
 
-function del (db, key, options, callback) {
-  var done
-  var _callback = callback
-
+async function del (db, key, options) {
   if (key != null) {
-    done = after(2, _callback || function () {})
-    callback = done
-    ttloff(db, [key], done)
+    await ttloff(db, [key])
   }
-
-  db._ttl.del.call(db, key, options, callback)
+  await db._ttl.del.call(db, key, options)
 }
 
-function batch (db, arr, options, callback) {
-  if (typeof options === 'function') {
-    callback = options
-    options = {}
-  }
-
-  options || (options = {})
-
+async function batch (db, arr, options = {}) {
   if (db._ttl.options.defaultTTL > 0 && !options.ttl && options.ttl !== 0) {
     options.ttl = db._ttl.options.defaultTTL
   }
 
-  var done
-  var on
-  var off
-  var _callback = callback
-
   if (options.ttl > 0 && Array.isArray(arr)) {
-    done = after(3, _callback || function () {})
-    callback = done
-
-    on = []
-    off = []
+    const on = []
+    const off = []
     arr.forEach(function (entry) {
       if (!entry || entry.key == null) { return }
-
       if (entry.type === 'put' && entry.value != null) on.push(entry.key)
       if (entry.type === 'del') off.push(entry.key)
     })
-
-    if (on.length) {
-      ttlon(db, on, options.ttl, done)
-    } else {
-      done()
-    }
-
-    if (off.length) {
-      ttloff(db, off, done)
-    } else {
-      done()
-    }
+    await Promise.all([
+      on.length ? ttlon(db, on, options.ttl) : null,
+      off.length ? ttloff(db, off) : null
+    ])
   }
 
-  db._ttl.batch.call(db, arr, options, callback)
+  return db._ttl.batch.call(db, arr, options)
 }
 
-function close (db, callback) {
-  stopTtl(db, function () {
-    if (db._ttl && typeof db._ttl.close === 'function') {
-      return db._ttl.close.call(db, callback)
-    }
-    callback && callback()
-  })
+async function close (db) {
+  await stopTtl(db)
+  if (db._ttl && typeof db._ttl.close === 'function') {
+    await db._ttl.close.call(db)
+  }
 }
 
-function setup (db, options) {
+function setup (db, options = {}) {
   if (db._ttl) return
 
-  options || (options = {})
-
-  options = xtend({
+  options = Object.assign({
     methodPrefix: '',
     namespace: options.sub ? '' : 'ttl',
     expiryNamespace: 'x',
@@ -273,7 +211,7 @@ function setup (db, options) {
     encoding: encoding.create(options),
     _prefixNs: _prefixNs,
     _expiryNs: _prefixNs.concat(options.expiryNamespace),
-    _lock: new Lock()
+    _lock: new AsyncLock()
   }
 
   db[options.methodPrefix + 'put'] = put.bind(null, db)
