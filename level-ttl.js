@@ -1,8 +1,6 @@
-'use strict'
-
-const encoding = require('./encoding')
-const AsyncLock = require('async-lock')
-const { EntryStream } = require('level-read-stream')
+import { createEncoding } from './encoding.js'
+import AsyncLock from 'async-lock'
+import { EntryStream } from 'level-read-stream'
 
 function prefixKey (db, key) {
   return db._ttl.encoding.encode(db._ttl._prefixNs.concat(key))
@@ -120,7 +118,7 @@ async function ttloff (db, keys) {
           batch.push({ type: 'del', key: prefixedKey })
         }
       } catch (err) {
-        if (err.name !== 'NotFoundError') throw err
+        if (err.code !== 'LEVEL_NOT_FOUND') throw err
       }
     }))
     if (!batch.length) return
@@ -181,7 +179,7 @@ async function batch (db, arr, options = {}) {
 }
 
 async function close (db) {
-  await stopTtl(db)
+  stopTtl(db)
   if (db._ttl && typeof db._ttl.close === 'function') {
     await db._ttl.close.call(db)
   }
@@ -208,7 +206,7 @@ function setup (db, options = {}) {
     close: db.close.bind(db),
     sub: options.sub,
     options: options,
-    encoding: encoding.create(options),
+    encoding: createEncoding(options),
     _prefixNs: _prefixNs,
     _expiryNs: _prefixNs.concat(options.expiryNamespace),
     _lock: new AsyncLock()
@@ -227,4 +225,4 @@ function setup (db, options = {}) {
   return db
 }
 
-module.exports = setup
+export default setup

@@ -1,8 +1,4 @@
-'use strict'
-
-exports.create = function createEncoding (options) {
-  options || (options = {})
-
+export function createEncoding (options = {}) {
   if (options.ttlEncoding) return options.ttlEncoding
 
   const PATH_SEP = options.separator

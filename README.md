@@ -15,12 +15,22 @@
 
 <details><summary>Click to expand</summary>
 
+- [Install](#install)
 - [Usage](#usage)
 - [Contributing](#contributing)
 - [Donate](#donate)
 - [License](#license)
 
 </details>
+
+## Install
+With [npm](https://npmjs.org) do:
+
+```
+npm install level-ttl
+```
+
+Usage from TypeScript also requires `npm install @types/readable-stream`.
 
 ## Usage
 
@@ -31,8 +41,8 @@ Augment `levelup` to handle a new `ttl` option on `put()` and `batch()` that spe
 Requires [`levelup`][levelup], [`level`][level] or one of its variants like [`level-rocksdb`][level-rocksdb] to be installed separately.
 
 ```js
-const level = require('level')
-const ttl = require('level-ttl')
+import level from 'level'
+import ttl from 'level-ttl'
 
 const db = ttl(level('./db'))
 
@@ -89,9 +99,9 @@ You can provide a custom storage for the meta data by using the `opts.sub` prope
 A db for the data and a separate to store the meta data:
 
 ```js
-const level = require('level')
-const ttl = require('level-ttl')
-const meta = level('./meta')
+import level from 'level'
+import ttl from 'level-ttl'
+import meta from './meta.js'
 
 const db = ttl(level('./db'), { sub: meta })
 
