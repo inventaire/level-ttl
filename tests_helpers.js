@@ -89,12 +89,24 @@ export function contains (entries, key, value) {
   throw new Error('does not contain ' + formatRecord(key, value))
 }
 
+/**
+ * @typedef {Object} BatchOp
+ * @property {'put'} type
+ * @property {string} key
+ * @property {string} value
+ */
+
+/**
+ * @param {number} length
+ * @return {BatchOp[]}
+ */
 export function randomPutBatch (length) {
   const batch = []
   const randomize = () => random.string({ enc: 'base58', length: 10 })
   for (let i = 0; i < length; ++i) {
     batch.push({ type: 'put', key: randomize(), value: randomize() })
   }
+  // @ts-expect-error
   return batch
 }
 

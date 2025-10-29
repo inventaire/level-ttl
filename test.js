@@ -70,6 +70,7 @@ describe('put', () => {
   it('should throw on missing key', async () => {
     const db = levelTtl({ checkFrequency: 50 })
     try {
+      // @ts-expect-error
       await db.put()
       shouldNotBeCalled()
     } catch (err) {
@@ -251,6 +252,7 @@ describe('del', () => {
   it('should throw on missing key', async () => {
     const db = levelTtl({ checkFrequency: 50 })
     try {
+      // @ts-expect-error
       await db.del()
       shouldNotBeCalled()
     } catch (err) {
@@ -280,6 +282,7 @@ describe('del', () => {
 
   it('should remove both key and its ttl meta data (custom ttlEncoding)', async () => {
     const db = levelTtl({ checkFrequency: 50, keyEncoding: 'utf8', valueEncoding: 'json', ttlEncoding: bytewise })
+    // @ts-expect-error
     db.put('foo', { v: 'foovalue' })
     db.put('bar', { v: 'barvalue' }, { ttl: 250 })
 
@@ -466,7 +469,7 @@ describe('stop', () => {
     await db.put('foo', 'bar1', { ttl: 25 })
     await wait(40)
     const res = await db.get('foo')
-    res.should.equal('bar1')
+    should(res).equal('bar1')
     await wait(40)
     const res2 = await db.get('foo')
     // Getting a missing key doesn't throw an error anymore,

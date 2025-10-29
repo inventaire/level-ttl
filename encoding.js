@@ -10,7 +10,7 @@ export function createEncoding (options = {}) {
   }
 
   return {
-    buffer: false,
+    format: 'utf8',
     encode: function (e) {
       // TODO: reexamine this with respect to level-sublevel@6's native codecs
       if (Array.isArray(e)) {

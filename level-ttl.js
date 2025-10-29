@@ -186,41 +186,42 @@ async function close (db) {
 }
 
 function setup (db, options = {}) {
-  if (db._ttl) return
+  if ('_ttl' in db) return db
 
-  options = Object.assign({
+  const opts = {
     methodPrefix: '',
     namespace: options.sub ? '' : 'ttl',
     expiryNamespace: 'x',
     separator: '!',
     checkFrequency: 10000,
-    defaultTTL: 0
-  }, options)
+    defaultTTL: 0,
+    ...options
+  }
 
-  const _prefixNs = options.namespace ? [options.namespace] : []
+  const _prefixNs = opts.namespace ? [opts.namespace] : []
 
   db._ttl = {
     put: db.put.bind(db),
     del: db.del.bind(db),
     batch: db.batch.bind(db),
     close: db.close.bind(db),
-    sub: options.sub,
-    options: options,
-    encoding: createEncoding(options),
+    sub: 'sub' in opts ? opts.sub : undefined,
+    options: opts,
+    encoding: createEncoding(opts),
     _prefixNs: _prefixNs,
-    _expiryNs: _prefixNs.concat(options.expiryNamespace),
+    _expiryNs: _prefixNs.concat(opts.expiryNamespace),
     _lock: new AsyncLock()
   }
 
-  db[options.methodPrefix + 'put'] = put.bind(null, db)
-  db[options.methodPrefix + 'del'] = del.bind(null, db)
-  db[options.methodPrefix + 'batch'] = batch.bind(null, db)
-  db[options.methodPrefix + 'ttl'] = setTtl.bind(null, db)
-  db[options.methodPrefix + 'stop'] = stopTtl.bind(null, db)
+  db[opts.methodPrefix + 'put'] = put.bind(null, db)
+  db[opts.methodPrefix + 'del'] = del.bind(null, db)
+  db[opts.methodPrefix + 'batch'] = batch.bind(null, db)
+  db[opts.methodPrefix + 'ttl'] = setTtl.bind(null, db)
+  db[opts.methodPrefix + 'stop'] = stopTtl.bind(null, db)
   // we must intercept close()
   db.close = close.bind(null, db)
 
-  startTtl(db, options.checkFrequency)
+  startTtl(db, opts.checkFrequency)
 
   return db
 }
