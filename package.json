@@ -14,7 +14,8 @@
   },
   "files": [
     "encoding.js",
-    "level-ttl.js"
+    "level-ttl.js",
+    "level-ttl.d.ts"
   ],
   "dependencies": {
     "async-lock": "^1.4.1",
