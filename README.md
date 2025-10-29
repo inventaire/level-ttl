@@ -41,22 +41,20 @@ Augment `levelup` to handle a new `ttl` option on `put()` and `batch()` that spe
 Requires [`levelup`][levelup], [`level`][level] or one of its variants like [`level-rocksdb`][level-rocksdb] to be installed separately.
 
 ```js
-import level from 'level'
+import level from 'classic-level'
 import ttl from 'level-ttl'
 
 const db = ttl(level('./db'))
 
 // This entry will only stay in the store for 1 hour
-db.put('foo', 'bar', { ttl: 1000 * 60 * 60 }, (err) => {
-  // ..
-})
+await db.put('foo', 'bar', { ttl: 1000 * 60 * 60 })
 
-db.batch([
+await db.batch([
   // Same for these two entries
   { type: 'put', key: 'foo', value: 'bar' },
   { type: 'put', key: 'bam', value: 'boom' },
   { type: 'del', key: 'w00t' }
-], { ttl: 1000 * 60 * 5 }, (err) => {})
+], { ttl: 1000 * 60 * 5 })
 ```
 
 If you put the same entry twice, you **refresh** the TTL to the _last_ put operation. In this way you can build utilities like [session managers](https://github.com/rvagg/node-level-session/) for your web application where the user's session is refreshed with each visit but expires after a set period of time since their last visit.
@@ -64,8 +62,8 @@ If you put the same entry twice, you **refresh** the TTL to the _last_ put opera
 Alternatively, for a lower write-footprint you can use the `ttl()` method that is added to your `levelup` instance which can serve to insert or update a ttl for any given key in the database - even if that key doesn't exist but may in the future!
 
 ```js
-db.put('foo', 'bar', (err) => {})
-db.ttl('foo', 1000 * 60 * 60, (err) => {})
+await db.put('foo', 'bar')
+await db.ttl('foo', 1000 * 60 * 60)
 ```
 
 `level-ttl` uses an internal scan every 10 seconds by default, this limits the available resolution of your TTL values, possibly delaying a delete for up to 10 seconds. The resolution can be tuned by passing the `checkFrequency` option to the `ttl()` initialiser.
@@ -88,8 +86,8 @@ const db = ttl(level('./db'), {
   defaultTTL: 15 * 60 * 1000
 })
 
-db.put('A', 'beep', (err) => {})
-db.put('B', 'boop', { ttl: 60 * 1000 }, (err) => {})
+await db.put('A', 'beep')
+await db.put('B', 'boop', { ttl: 60 * 1000 })
 ```
 
 ### `opts.sub`
@@ -99,28 +97,32 @@ You can provide a custom storage for the meta data by using the `opts.sub` prope
 A db for the data and a separate to store the meta data:
 
 ```js
-import level from 'level'
+import level from 'classic-level'
 import ttl from 'level-ttl'
-import meta from './meta.js'
+import { EntryStream }  from 'level-read-stream'
 
-const db = ttl(level('./db'), { sub: meta })
+const rootDb = level('./db')
+const meta = rootDb.sublevel('meta')
+
+const db = ttl(rootDb, { sub: meta })
 
 const batch = [
   { type: 'put', key: 'foo', value: 'foo value' },
   { type: 'put', key: 'bar', value: 'bar value' }
 ]
 
-db.batch(batch, { ttl: 100 }, function (err) {
-  db.createReadStream()
-    .on('data', function (data) {
-      console.log('data', data)
-    })
-    .on('end', function () {
-      meta.createReadStream()
-        .on('data', function (data) {
-          console.log('meta', data)
-        })
-    })
+await db.batch(batch, { ttl: 100 })
+
+new EntryStream(db)
+  .on('data', function (data) {
+    console.log('data', data)
+  })
+  .on('end', function () {
+    new EntryStream(meta)
+      .on('data', function (data) {
+        console.log('meta', data)
+      })
+  })
 })
 ```
 
