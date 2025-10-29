@@ -1,3 +1,4 @@
+/* eslint-env mocha */
 import should from 'should'
 import { MemoryLevel } from 'memory-level'
 import ttl from './level-ttl.js'
@@ -37,11 +38,11 @@ describe('level-ttl', () => {
     await ttldb.batch(batch, { ttl: 10000 })
     const entries = await getDbEntries(db)
     batch.forEach(item => {
-        contains(entries, prefix(bwEncode([item.key])), bwRange())
-        contains(entries, {
-          gt: prefix(bwEncode(['x', new Date(0), item.key])),
-          lt: prefix(bwEncode(['x', new Date(9999999999999), item.key]))
-        }, bwEncode(item.key))
+      contains(entries, prefix(bwEncode([item.key])), bwRange())
+      contains(entries, {
+        gt: prefix(bwEncode(['x', new Date(0), item.key])),
+        lt: prefix(bwEncode(['x', new Date(9999999999999), item.key]))
+      }, bwEncode(item.key))
     })
   })
 
@@ -90,7 +91,6 @@ describe('put', () => {
     contains(entries, 'foo', 'foovalue')
   })
 
-
   it('should put a single ttl entry (custom ttlEncoding)', async () => {
     const db = levelTtl({ checkFrequency: 50, ttlEncoding: bytewise })
     await db.put('foo', 'foovalue')
@@ -101,7 +101,7 @@ describe('put', () => {
     contains(entries, Buffer.from('bar'), Buffer.from('barvalue'))
     contains(entries, Buffer.from('foo'), Buffer.from('foovalue'))
     const updatedEntries = await getDbEntriesAfterDelay(db, 150)
-    updatedEntries.should.deepEqual([ { key: 'foo', value: 'foovalue' } ])
+    updatedEntries.should.deepEqual([{ key: 'foo', value: 'foovalue' }])
   })
 
   it('should put multiple ttl entries', async () => {
@@ -136,7 +136,7 @@ describe('put', () => {
       expect(25, 3),
       expect(200, 2),
       expect(350, 1),
-      expect(500, 0),
+      expect(500, 0)
     ])
   })
 
@@ -172,7 +172,7 @@ describe('put', () => {
       expect(25, 3),
       expect(200, 2),
       expect(350, 1),
-      expect(500, 0),
+      expect(500, 0)
     ])
   })
 
@@ -411,11 +411,11 @@ async function basicBatchPutTest (db, timeout, opts) {
     { type: 'put', key: 'bar', value: 'barvalue' }
   ], opts)
   await wait(50)
-  const res = await db.getMany([ 'foo', 'bar' ])
-  res.should.deepEqual([ 'foovalue', 'barvalue' ])
+  const res = await db.getMany(['foo', 'bar'])
+  res.should.deepEqual(['foovalue', 'barvalue'])
   await wait(timeout - 50)
-  const res2 = await db.getMany([ 'foo', 'bar' ])
-  res2.should.deepEqual([ undefined, undefined ])
+  const res2 = await db.getMany(['foo', 'bar'])
+  res2.should.deepEqual([undefined, undefined])
 }
 
 describe('ttl', () => {
